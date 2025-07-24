@@ -2,6 +2,10 @@ import express, { Application, Request, Response } from "express";
 import { usersRoutes } from "./app/controllers/user.controller";
 import cors from "cors";
 import { companyRoutes } from "./app/controllers/company.controller";
+import { productRoutes } from "./app/controllers/product.controller";
+import { purchaseRoutes } from "./app/controllers/purchase.controller";
+import { storeRoutes } from "./app/controllers/store.controller";
+import { saleRoutes } from "./app/controllers/sales.controller";
 
 const app: Application = express();
 
@@ -11,6 +15,10 @@ app.use(express.json());
 
 app.use("/api/users", usersRoutes);
 app.use("/api/company", companyRoutes);
+app.use("/api/product", productRoutes);
+app.use("/api/purchase", purchaseRoutes);
+app.use("/api/store", storeRoutes);
+app.use("/api/sale", saleRoutes);
 
 app.get("/", (req: Request, res: Response) => {
   res.send("Welcome to Gazi tiles");
