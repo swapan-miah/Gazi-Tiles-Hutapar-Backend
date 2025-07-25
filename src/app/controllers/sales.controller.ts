@@ -83,3 +83,55 @@ saleRoutes.get("/", async (req, res) => {
     sales,
   });
 });
+saleRoutes.get("/group/custom-date", async (req: Request, res: Response) => {
+  try {
+    const { date } = req.query;
+
+    if (!date) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Date is required" });
+    }
+
+    const groupedData = await Sale.aggregate([
+      {
+        $match: {
+          date: date,
+        },
+      },
+      {
+        $unwind: "$products",
+      },
+      {
+        $group: {
+          _id: {
+            product_code: "$products.product_code",
+            date: "$date",
+          },
+          total_caton: { $sum: "$products.sell_caton" },
+          total_feet: { $sum: "$products.sell_feet" },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          product_code: "$_id.product_code",
+          date: "$_id.date",
+          total_caton: 1,
+          total_feet: 1,
+        },
+      },
+      {
+        $sort: { product_code: 1 },
+      },
+    ]);
+
+    res.json({
+      success: true,
+      count: groupedData.length,
+      data: groupedData,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Server Error", error });
+  }
+});
