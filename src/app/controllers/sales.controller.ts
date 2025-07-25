@@ -24,54 +24,62 @@ const saleSchema = z.object({
   date: z.string().min(1),
 });
 
-saleRoutes.post("/create", async (req: Request, res: Response) => {
+saleRoutes.post("/create", async (req, res) => {
   try {
-    const result = saleSchema.safeParse(req.body);
-    if (!result.success) {
-      return res
-        .status(400)
-        .json({ success: false, errors: result.error.flatten().fieldErrors });
-    }
+    const parsed = saleSchema.parse(req.body);
 
-    const { customer, products, date } = result.data;
-
-    // Check & update stock
-    for (const product of products) {
-      const storeItem = await Store.findOne({
-        product_code: product.product_code,
-      });
-      if (!storeItem) {
-        return res.status(404).json({
-          success: false,
-          message: `Product ${product.product_code} not found in store.`,
-        });
-      }
-
-      if (
-        product.sell_caton > storeItem.caton ||
-        product.sell_feet > storeItem.feet
-      ) {
+    for (const p of parsed.products) {
+      const store = await Store.findOne({ product_code: p.product_code });
+      if (!store || store.caton < p.sell_caton || store.feet < p.sell_feet) {
         return res.status(400).json({
           success: false,
-          message: `Insufficient stock for ${product.product_code}.`,
+          message: `Insufficient stock for ${p.product_code}`,
         });
       }
-
-      // Reduce stock
-      storeItem.caton -= product.sell_caton;
-      storeItem.feet -= product.sell_feet;
-      await storeItem.save();
     }
 
-    // Save Sale
-    const sale = await Sale.create({ customer, products, date });
+    await Promise.all(
+      parsed.products.map((p) =>
+        Store.updateOne(
+          { product_code: p.product_code },
+          {
+            $inc: {
+              caton: -p.sell_caton,
+              feet: -p.sell_feet,
+            },
+          }
+        )
+      )
+    );
 
-    res.status(201).json({
-      success: true,
-      message: "Sale recorded successfully",
-      data: sale,
-    });
-  } catch (err) {
+    const sale = new Sale(parsed);
+    await sale.save();
+    res.json({ success: true, message: "Sale saved" });
+  } catch (err: any) {
+    if (err.name === "ZodError") {
+      return res
+        .status(400)
+        .json({ success: false, message: err.errors[0]?.message });
+    }
     res.status(500).json({ success: false, message: "Server error" });
   }
+});
+
+saleRoutes.get("/", async (req, res) => {
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 20;
+
+  const total = await Sale.countDocuments();
+  const sales = await Sale.find()
+    .sort({ createdAt: -1 }) // descending order
+    .skip((page - 1) * limit)
+    .limit(limit);
+
+  res.json({
+    success: true,
+    total,
+    page,
+    totalPages: Math.ceil(total / limit),
+    sales,
+  });
 });

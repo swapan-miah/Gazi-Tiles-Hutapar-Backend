@@ -84,7 +84,6 @@ purchaseRoutes.post(
 );
 
 purchaseRoutes.get(
-  // Changed to GET as it's fetching data
   "/history",
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -115,6 +114,59 @@ purchaseRoutes.get(
       });
     } catch (err) {
       next(err); // Pass the error to the centralized error handler
+    }
+  }
+);
+
+purchaseRoutes.get(
+  "/group/custom-date",
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const date = req.query.date as string;
+
+      if (!date) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Date is required" });
+      }
+
+      const results = await Purchase.aggregate([
+        {
+          $match: {
+            date: date,
+          },
+        },
+        {
+          $group: {
+            _id: "$product_code",
+            totalCaton: { $sum: "$caton" },
+            totalFeet: { $sum: "$feet" },
+            company: { $first: "$company" },
+            invoiceNumbers: { $push: "$invoice_number" },
+            date: { $first: "$date" },
+          },
+        },
+        {
+          $sort: { date: -1 }, // নতুনগুলো উপরে
+        },
+      ]);
+
+      const formatted = results.map((item) => ({
+        product_code: item._id,
+        company: item.company,
+        total_caton: item.totalCaton,
+        total_feet: item.totalFeet,
+        invoices: item.invoiceNumbers,
+        date: item.date,
+      }));
+
+      res.status(200).json({
+        success: true,
+        count: formatted.length,
+        data: formatted,
+      });
+    } catch (err) {
+      next(err); // Central error handler
     }
   }
 );
