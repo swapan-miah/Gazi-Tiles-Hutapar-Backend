@@ -6,6 +6,7 @@ import { productRoutes } from "./app/controllers/product.controller";
 import { purchaseRoutes } from "./app/controllers/purchase.controller";
 import { storeRoutes } from "./app/controllers/store.controller";
 import { saleRoutes } from "./app/controllers/sales.controller";
+import { invoiceRoutes } from "./app/controllers/invoice.controller";
 
 const app: Application = express();
 
@@ -19,6 +20,7 @@ app.use("/api/product", productRoutes);
 app.use("/api/purchase", purchaseRoutes);
 app.use("/api/store", storeRoutes);
 app.use("/api/sale", saleRoutes);
+app.use("/api/invoice", invoiceRoutes);
 
 app.get("/", (req: Request, res: Response) => {
   res.send("Welcome to Gazi tiles");
