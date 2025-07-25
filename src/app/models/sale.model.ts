@@ -4,19 +4,49 @@ import { ISale } from "../interfaces/sale.interface";
 
 const SaleSchema = new Schema<ISale>({
   customer: {
-    name: String,
-    address: String,
-    mobile: String,
+    name: {
+      type: String,
+      required: true,
+    },
+    address: {
+      type: String,
+      required: true,
+    },
+    mobile: {
+      type: String,
+      required: true,
+    },
   },
   products: [
     {
-      product_code: String,
-      sell_caton: Number,
-      sell_feet: Number,
+      product_code: {
+        type: String,
+        required: true,
+      },
+      sell_caton: {
+        type: Number,
+        required: true,
+      },
+      sell_feet: {
+        type: Number,
+        required: true,
+      },
+      store_caton: {
+        type: Number,
+        required: true,
+      },
+      store_feet: {
+        type: Number,
+        required: true,
+      },
     },
   ],
   date: {
     type: String,
+    required: true,
+  },
+  invoice_number: {
+    type: Number,
     required: true,
   },
 });

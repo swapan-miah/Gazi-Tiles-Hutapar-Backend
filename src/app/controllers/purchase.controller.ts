@@ -1,6 +1,7 @@
 import express, { Request, Response, NextFunction } from "express";
 import { Purchase } from "../models/purchase.model";
 import { Store } from "../models/store.model";
+import mongoose from "mongoose";
 
 export const purchaseRoutes = express.Router();
 
@@ -8,11 +9,14 @@ export const purchaseRoutes = express.Router();
 purchaseRoutes.post(
   "/create",
   async (req: Request, res: Response, next: NextFunction) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
       const { product_code, company, caton, feet, invoice_number, date } =
         req.body;
 
-      // ✅ 1. Input Validation
+      // 1. Input Validation
       if (
         !product_code ||
         !company ||
@@ -21,6 +25,8 @@ purchaseRoutes.post(
         !invoice_number ||
         !date
       ) {
+        await session.abortTransaction();
+        session.endSession();
         return res.status(400).json({
           success: false,
           message: "All fields are required.",
@@ -28,15 +34,22 @@ purchaseRoutes.post(
       }
 
       if (caton < 1 || feet < 1) {
+        await session.abortTransaction();
+        session.endSession();
         return res.status(400).json({
           success: false,
           message: "Caton and feet must be greater than 0.",
         });
       }
 
-      // ✅ 2. Duplicate Purchase Check
-      const exists = await Purchase.findOne({ product_code, invoice_number });
+      // 2. Duplicate Purchase Check
+      const exists = await Purchase.findOne({
+        product_code,
+        invoice_number,
+      }).session(session);
       if (exists) {
+        await session.abortTransaction();
+        session.endSession();
         return res.status(409).json({
           success: false,
           message:
@@ -44,40 +57,57 @@ purchaseRoutes.post(
         });
       }
 
-      // ✅ 3. Save Purchase
-      const newPurchase = await Purchase.create({
-        product_code,
-        company,
-        caton,
-        feet,
-        invoice_number,
-        date,
-      });
+      // 3. Save Purchase
+      const newPurchase = await Purchase.create(
+        [
+          {
+            product_code,
+            company,
+            caton,
+            feet,
+            invoice_number,
+            date,
+          },
+        ],
+        { session }
+      );
 
-      // ✅ 4. Update or Create Store
-      const store = await Store.findOne({ product_code, company });
+      // 4. Update or Create Store
+      const store = await Store.findOne({ product_code, company }).session(
+        session
+      );
 
       if (store) {
-        // ➕ Update stock
+        // Update stock
         store.caton += caton;
         store.feet += feet;
-        await store.save();
+        await store.save({ session });
       } else {
-        // 🆕 Create new stock
-        await Store.create({
-          product_code,
-          company,
-          caton,
-          feet,
-        });
+        // Create new stock
+        await Store.create(
+          [
+            {
+              product_code,
+              company,
+              caton,
+              feet,
+            },
+          ],
+          { session }
+        );
       }
+
+      await session.commitTransaction();
+      session.endSession();
 
       return res.status(201).json({
         success: true,
         message: "Purchase added and store updated.",
-        data: newPurchase,
+        data: newPurchase[0],
       });
     } catch (err) {
+      await session.abortTransaction();
+      session.endSession();
       next(err);
     }
   }

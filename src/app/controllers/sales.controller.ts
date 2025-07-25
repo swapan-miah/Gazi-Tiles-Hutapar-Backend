@@ -3,6 +3,8 @@ import express, { Request, Response } from "express";
 import { z } from "zod";
 import { Sale } from "../models/sale.model";
 import { Store } from "../models/store.model";
+import { Invoice } from "../models/invoice.model";
+import mongoose from "mongoose";
 
 export const saleRoutes = express.Router();
 
@@ -18,50 +20,120 @@ const saleSchema = z.object({
         product_code: z.string().min(1),
         sell_caton: z.number().min(1),
         sell_feet: z.number().min(1),
+        store_caton: z.number().min(1),
+        store_feet: z.number().min(1),
       })
     )
     .min(1),
   date: z.string().min(1),
+  invoice_number: z.number().min(1),
 });
 
 saleRoutes.post("/create", async (req, res) => {
-  try {
-    const parsed = saleSchema.parse(req.body);
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
+  try {
+    console.log("🔍 Parsing request body...");
+    const parsed = saleSchema.parse(req.body);
+    const currentInvoice = parsed.invoice_number;
+    console.log("✅ Schema validated:", parsed);
+
+    // ✅ পর্যাপ্ত স্টক আছে কিনা চেক
+    console.log("🔍 Checking stock availability...");
     for (const p of parsed.products) {
-      const store = await Store.findOne({ product_code: p.product_code });
-      if (!store || store.caton < p.sell_caton || store.feet < p.sell_feet) {
-        return res.status(400).json({
-          success: false,
-          message: `Insufficient stock for ${p.product_code}`,
-        });
+      const store = await Store.findOne({
+        product_code: p.product_code,
+      }).session(session);
+
+      if (!store) {
+        throw new Error(`Stock not found for product: ${p.product_code}`);
+      }
+
+      if (store.caton < p.sell_caton || store.feet < p.sell_feet) {
+        throw new Error(`Insufficient stock for ${p.product_code}`);
       }
     }
+    console.log("✅ Stock availability confirmed.");
 
-    await Promise.all(
-      parsed.products.map((p) =>
-        Store.updateOne(
-          { product_code: p.product_code },
-          {
-            $inc: {
-              caton: -p.sell_caton,
-              feet: -p.sell_feet,
-            },
-          }
-        )
-      )
-    );
-
-    const sale = new Sale(parsed);
-    await sale.save();
-    res.json({ success: true, message: "Sale saved" });
-  } catch (err: any) {
-    if (err.name === "ZodError") {
-      return res
-        .status(400)
-        .json({ success: false, message: err.errors[0]?.message });
+    // ✅ স্টক হালনাগাদ
+    console.log("🔄 Updating stock...");
+    for (const p of parsed.products) {
+      const result = await Store.updateOne(
+        { product_code: p.product_code },
+        {
+          $inc: {
+            caton: -p.sell_caton,
+            feet: -p.sell_feet,
+          },
+        },
+        { session }
+      );
+      console.log(`✅ Stock updated for ${p.product_code}`, result);
     }
-    res.status(500).json({ success: false, message: "Server error" });
+
+    // ✅ সেল সেভ
+    console.log("💾 Saving sale data...");
+    const sale = new Sale(parsed);
+    await sale.save({ session });
+    console.log("✅ Sale saved.");
+
+    // ✅ ইনভয়েস আপডেট
+    console.log("🔢 Updating invoice number...");
+    const invoiceResult = await Invoice.updateOne(
+      { _id: "68830830b0857da6bf29f920" },
+      { $set: { invoice_number: currentInvoice + 1 } },
+      { session }
+    );
+    console.log("✅ Invoice updated", invoiceResult);
+
+    // ✅ ট্রানজেকশন সফলভাবে সম্পন্ন
+    await session.commitTransaction();
+    session.endSession();
+    console.log("✅ Transaction committed.");
+
+    return res.json({
+      success: true,
+      message: "Sale completed successfully",
+      invoice_number: currentInvoice,
+    });
+  } catch (err: any) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error("❌ Transaction aborted due to error:", err);
+
+    // ✅ Zod validation error
+    if (err.name === "ZodError") {
+      return res.status(400).json({
+        success: false,
+        message: err.errors?.[0]?.message || "Invalid input",
+        errorType: "ValidationError",
+      });
+    }
+
+    // ✅ Custom stock error or manual error
+    if (err instanceof Error && err.message.includes("Insufficient stock")) {
+      return res.status(400).json({
+        success: false,
+        message: err.message,
+        errorType: "StockError",
+      });
+    }
+
+    if (err instanceof Error && err.message.includes("Stock not found")) {
+      return res.status(404).json({
+        success: false,
+        message: err.message,
+        errorType: "NotFoundError",
+      });
+    }
+
+    // ✅ অন্যান্য সার্ভার সাইড error
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: err.message || err,
+    });
   }
 });
 
