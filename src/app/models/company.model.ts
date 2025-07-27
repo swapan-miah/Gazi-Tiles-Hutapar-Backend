@@ -14,7 +14,7 @@ const companySchema = new Schema<ICompany & Document>(
   },
   {
     versionKey: false,
-    timestamps: false,
+    timestamps: true,
     collection: "companies", // plural নাম দিন, এটা MongoDB-এর convension
   }
 );

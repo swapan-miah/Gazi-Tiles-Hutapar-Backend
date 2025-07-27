@@ -6,13 +6,23 @@ export const productRoutes = express.Router();
 
 // ✅ Define Zod schema
 const productSchema = z.object({
-  company: z.string().min(1, "Company name is required"),
-  product_code: z.string().min(1, "Product code is required"),
+  company: z
+    .string()
+    .trim()
+    .min(1, "Company name is required")
+    .transform((val) => val.toLowerCase()),
+  product_code: z
+    .string()
+    .trim()
+    .min(1, "Product Code is required")
+    .transform((val) => val.toLowerCase()),
+  height: z.number().gt(0, "Height must be greater than 0"),
+  width: z.number().gt(0, "Width must be greater than 0"),
+  per_caton_to_pcs: z.number().gt(0, "Per caton to pcs must be greater than 0"),
 });
 
 // ✅ Route to create a new product
 productRoutes.post("/create", async (req: Request, res: Response) => {
-  // ✅ Zod validation
   const parsed = productSchema.safeParse(req.body);
 
   if (!parsed.success) {
@@ -25,10 +35,10 @@ productRoutes.post("/create", async (req: Request, res: Response) => {
     });
   }
 
-  const { company, product_code } = parsed.data;
+  const { product_code } = parsed.data;
 
   try {
-    // ✅ Check for duplicate product by product_code
+    // ✅ Check for duplicate product
     const existing = await Product.findOne({ product_code });
     if (existing) {
       return res.status(409).json({
@@ -37,8 +47,8 @@ productRoutes.post("/create", async (req: Request, res: Response) => {
       });
     }
 
-    // ✅ Create new product
-    const newProduct = new Product({ company, product_code });
+    // ✅ Create and save new product
+    const newProduct = new Product(parsed.data); // Pass full validated data
     await newProduct.save();
 
     return res.status(201).json({
@@ -47,7 +57,6 @@ productRoutes.post("/create", async (req: Request, res: Response) => {
       product: newProduct,
     });
   } catch (error: any) {
-    // ✅ Handle duplicate key error from MongoDB
     if (error.code === 11000) {
       return res.status(409).json({
         success: false,
@@ -62,10 +71,60 @@ productRoutes.post("/create", async (req: Request, res: Response) => {
     });
   }
 });
+
+// ✅ Update product route with validation
+productRoutes.put("/update/:id", async (req: Request, res: Response) => {
+  const parsed = productSchema.safeParse(req.body);
+
+  if (!parsed.success) {
+    const message = parsed.error.issues
+      .map((issue) => issue.message)
+      .join(", ");
+    return res.status(400).json({
+      success: false,
+      message,
+    });
+  }
+
+  const { id } = req.params;
+
+  try {
+    const updated = await Product.findByIdAndUpdate(id, parsed.data, {
+      new: true,
+    });
+
+    if (!updated) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found",
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "Product updated successfully",
+      product: updated,
+    });
+  } catch (error: any) {
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "Duplicate product entry",
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+});
+
 // ✅ Route to get all products
 productRoutes.get("/all", async (req: Request, res: Response) => {
   try {
-    const products = await Product.find().sort({ createdAt: -1 }); // সর্বশেষ প্রোডাক্ট আগে দেখাতে চাইলে
+    const products = await Product.find().sort({ createdAt: -1 }); // ✅ এখন কাজ করবে
     return res.status(200).json({
       success: true,
       message: "All products retrieved successfully",

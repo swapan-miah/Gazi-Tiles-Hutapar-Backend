@@ -12,7 +12,7 @@ const companySchema = z.object({
 // Get all companies
 companyRoutes.get("/all", async (req: Request, res: Response) => {
   try {
-    const companies = await Company.find({});
+    const companies = await Company.find({}).sort({ createdAt: -1 });
     res.status(200).json({
       success: true,
       message: "All companies retrieved successfully",
@@ -132,3 +132,4 @@ companyRoutes.get("/company/:company", async (req: Request, res: Response) => {
     });
   }
 });
+
