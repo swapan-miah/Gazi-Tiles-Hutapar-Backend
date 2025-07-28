@@ -3,11 +3,6 @@ import { IPurchase } from "../interfaces/purchase.interface";
 
 const PurchaseSchema = new Schema<IPurchase>(
   {
-    invoice_number: {
-      type: String,
-      required: [true, "Invoice number is required."], // Custom error message
-      trim: true,
-    },
     product_code: {
       type: String,
       required: [true, "Product code is required."],
@@ -23,10 +18,20 @@ const PurchaseSchema = new Schema<IPurchase>(
       required: [true, "Caton quantity is required."],
       min: [1, "Caton cannot be negative."], // Example of a number validator
     },
-    feet: {
+    height: {
       type: Number,
-      required: [true, "Feet quantity is required."],
-      min: [1, "Feet cannot be negative."], // Example of a number validator
+      required: [true, "Height is required."],
+      min: [1, "Hight cannot be negative."], // Example of a number validator
+    },
+    width: {
+      type: Number,
+      required: [true, "Weight is required."],
+      min: [1, "Wight cannot be negative."], // Example of a number validator
+    },
+    per_caton_to_pcs: {
+      type: Number,
+      required: [true, "per caton to pcs  is required."],
+      min: [1, "per caton to pcs cannot be negative."], // Example of a number validator
     },
     date: {
       type: String, // Consider using Date type if you plan to do date operations

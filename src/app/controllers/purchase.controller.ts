@@ -1,11 +1,165 @@
 import express, { Request, Response, NextFunction } from "express";
+import { z } from "zod";
 import { Purchase } from "../models/purchase.model";
 import { Store } from "../models/store.model";
 import mongoose from "mongoose";
 
 export const purchaseRoutes = express.Router();
 
-// POST /purchase/create
+const purchaseSchema = z.object({
+  product_code: z.string().min(1, "Product code is required"),
+  company: z.string().min(1, "Company is required"),
+  caton: z.number().min(1, "Caton must be at least 1"),
+  height: z.number().min(1, "Height must be at least 1"),
+  width: z.number().min(1, "Width must be at least 1"),
+  per_caton_to_pcs: z.number().min(1, "Per caton to pcs must be at least 1"),
+  date: z.string().min(1, "Date is required"),
+});
+
+// Helper function to calculate feet from purchase details
+const calculateFeet = (
+  height: number,
+  width: number,
+  per_caton_to_pcs: number,
+  caton: number
+): number => {
+  const perCatonToFeet = ((height * width) / 144) * per_caton_to_pcs;
+  return perCatonToFeet * caton;
+};
+
+// --- PATCH /api/purchase/update/:id ---
+purchaseRoutes.patch(
+  "/update/:id",
+  async (req: Request, res: Response, next: NextFunction) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      const { id } = req.params;
+
+      // Validate incoming body
+      const parsed = purchaseSchema.safeParse(req.body);
+      if (!parsed.success) {
+        await session.abortTransaction();
+        session.endSession();
+        const message = parsed.error.issues.map((i) => i.message).join(", ");
+        return res.status(400).json({ success: false, message });
+      }
+
+      const updateData = parsed.data;
+
+      // Get previous purchase
+      const oldPurchase = await Purchase.findById(id).session(session);
+      if (!oldPurchase) {
+        await session.abortTransaction();
+        session.endSession();
+        return res
+          .status(404)
+          .json({ success: false, message: "Purchase not found." });
+      }
+
+      const oldFeet = calculateFeet(
+        oldPurchase.height,
+        oldPurchase.width,
+        oldPurchase.per_caton_to_pcs,
+        oldPurchase.caton
+      );
+
+      // ==== Case 1: product_code changed ====
+      if (
+        updateData.product_code &&
+        updateData.product_code !== oldPurchase.product_code
+      ) {
+        // 1. Decrease feet from old store
+        const oldStore = await Store.findOne({
+          product_code: oldPurchase.product_code,
+        }).session(session);
+        if (oldStore) {
+          oldStore.feet -= oldFeet;
+          await oldStore.save({ session });
+        }
+
+        // 2. Create new store entry if not exist
+        let newStore = await Store.findOne({
+          product_code: updateData.product_code,
+        }).session(session);
+        const newFeet = calculateFeet(
+          updateData.height,
+          updateData.width,
+          updateData.per_caton_to_pcs,
+          updateData.caton
+        );
+
+        if (!newStore) {
+          newStore = new Store({
+            product_code: updateData.product_code,
+            company: updateData.company,
+            height: updateData.height,
+            width: updateData.width,
+            per_caton_to_pcs: updateData.per_caton_to_pcs,
+            feet: newFeet,
+          });
+        } else {
+          // এটা else হতেই পারবে না।
+          newStore.feet += newFeet;
+        }
+
+        await newStore.save({ session });
+
+        // 3. Update purchase
+        Object.assign(oldPurchase, updateData);
+        await oldPurchase.save({ session });
+      }
+
+      // ==== Case 2: product_code did NOT change ====
+      else {
+        // 1. Decrease old feet from store
+        const store = await Store.findOne({
+          product_code: oldPurchase.product_code,
+        }).session(session);
+        if (!store) {
+          await session.abortTransaction();
+          session.endSession();
+          return res
+            .status(404)
+            .json({ success: false, message: "Store not found." });
+        }
+
+        store.feet -= oldFeet;
+
+        // 2. Update purchase
+        Object.assign(oldPurchase, updateData);
+        await oldPurchase.save({ session });
+
+        // 3. Add new feet to store
+        const newFeet = calculateFeet(
+          oldPurchase.height,
+          oldPurchase.width,
+          oldPurchase.per_caton_to_pcs,
+          oldPurchase.caton
+        );
+
+        store.feet += newFeet;
+        await store.save({ session });
+      }
+
+      await session.commitTransaction();
+      session.endSession();
+
+      return res.status(200).json({
+        success: true,
+        message: "✅ Purchase updated successfully!",
+        data: oldPurchase,
+      });
+    } catch (err) {
+      await session.abortTransaction();
+      session.endSession();
+      next(err);
+    }
+  }
+);
+
+// --- POST /api/purchase/create ---
 purchaseRoutes.post(
   "/create",
   async (req: Request, res: Response, next: NextFunction) => {
@@ -13,86 +167,50 @@ purchaseRoutes.post(
     session.startTransaction();
 
     try {
-      const { product_code, company, caton, feet, invoice_number, date } =
-        req.body;
-
-      // 1. Input Validation
-      if (
-        !product_code ||
-        !company ||
-        !caton ||
-        !feet ||
-        !invoice_number ||
-        !date
-      ) {
+      const parsed = purchaseSchema.safeParse(req.body);
+      if (!parsed.success) {
         await session.abortTransaction();
         session.endSession();
-        return res.status(400).json({
-          success: false,
-          message: "All fields are required.",
-        });
+        const message = parsed.error.issues.map((i) => i.message).join(", ");
+        return res.status(400).json({ success: false, message });
       }
 
-      if (caton < 1 || feet < 1) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({
-          success: false,
-          message: "Caton and feet must be greater than 0.",
-        });
-      }
-
-      // 2. Duplicate Purchase Check
-      const exists = await Purchase.findOne({
+      const {
         product_code,
-        invoice_number,
-      }).session(session);
-      if (exists) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(409).json({
-          success: false,
-          message:
-            "A purchase with this product code and invoice number already exists.",
-        });
-      }
+        company,
+        caton,
+        height,
+        width,
+        per_caton_to_pcs,
+        date,
+      } = parsed.data;
 
-      // 3. Save Purchase
+      const feet = calculateFeet(height, width, per_caton_to_pcs, caton);
+
+      // Save Purchase
       const newPurchase = await Purchase.create(
         [
           {
             product_code,
             company,
             caton,
-            feet,
-            invoice_number,
+            height,
+            width,
+            per_caton_to_pcs,
             date,
           },
         ],
         { session }
       );
 
-      // 4. Update or Create Store
-      const store = await Store.findOne({ product_code, company }).session(
-        session
-      );
-
+      // Update/Create store
+      const store = await Store.findOne({ product_code }).session(session);
       if (store) {
-        // Update stock
-        store.caton += caton;
         store.feet += feet;
         await store.save({ session });
       } else {
-        // Create new stock
         await Store.create(
-          [
-            {
-              product_code,
-              company,
-              caton,
-              feet,
-            },
-          ],
+          [{ product_code, company, feet, height, width, per_caton_to_pcs }],
           { session }
         );
       }
@@ -102,13 +220,13 @@ purchaseRoutes.post(
 
       return res.status(201).json({
         success: true,
-        message: "Purchase added and store updated.",
+        message: "✅ Purchase added successfully!",
         data: newPurchase[0],
       });
     } catch (err) {
       await session.abortTransaction();
       session.endSession();
-      next(err);
+      next(err); // Pass error to the next middleware (error handler)
     }
   }
 );

@@ -1,8 +1,9 @@
 export interface IPurchase {
-  product_code: string;
   company: string;
+  product_code: string;
   caton: number;
-  feet: number;
-  invoice_number: string;
+  height: number;
+  width: number;
+  per_caton_to_pcs: number;
   date: string;
 }
