@@ -80,7 +80,6 @@ companyRoutes.post("/create", async (req: Request, res: Response) => {
   }
 });
 
-// Delete a company by name
 companyRoutes.delete(
   "/delete/:company",
   async (req: Request, res: Response) => {
@@ -132,4 +131,3 @@ companyRoutes.get("/company/:company", async (req: Request, res: Response) => {
     });
   }
 });
-

@@ -19,6 +19,23 @@ storeRoutes.get(
     }
   }
 );
+storeRoutes.get(
+  "/in-stock/all",
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const allStores = await Store.find({ feet: { $gt: 0 } }).sort({
+        product_code: 1,
+      });
+      res.status(200).json({
+        success: true,
+        total: allStores.length,
+        data: allStores,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 storeRoutes.get("/get-by-code/:code", async (req, res) => {
   try {
