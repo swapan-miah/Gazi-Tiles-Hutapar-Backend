@@ -3,7 +3,6 @@ import express, { Request, Response } from "express";
 import { z } from "zod";
 import { Sale } from "../models/sale.model";
 import { Store } from "../models/store.model";
-import { Invoice } from "../models/invoice.model";
 import mongoose from "mongoose";
 
 export const saleRoutes = express.Router();
@@ -75,13 +74,6 @@ saleRoutes.post("/create", async (req, res) => {
     // সেল সেভ করা
     const sale = new Sale(parsed);
     await sale.save({ session });
-
-    // ইনভয়েস আপডেট
-    await Invoice.updateOne(
-      { _id: "68830830b0857da6bf29f920" },
-      { $set: { invoice_number: invoiceNum + 1 } },
-      { session }
-    );
 
     await session.commitTransaction();
     session.endSession();
@@ -332,6 +324,85 @@ saleRoutes.put("/update/:id", async (req: Request, res: Response) => {
         success: false,
         message: err.message,
         errorType: "InvalidInputError",
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: err.message ?? err,
+    });
+  }
+});
+
+// New DELETE route to delete a sale and reset the stock
+saleRoutes.delete("/delete/:id", async (req: Request, res: Response) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { id } = req.params;
+
+    // Find the sale to be deleted
+    const saleToDelete = await Sale.findById(id).session(session);
+    if (!saleToDelete) {
+      // If sale is not found, abort and return a 404
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        success: false,
+        message: "Sale not found.",
+        errorType: "NotFoundError",
+      });
+    }
+
+    // Iterate through the products in the sale and update the stock
+    for (const p of saleToDelete.products) {
+      // Find the corresponding product in the Store collection
+      const store = await Store.findOne({
+        product_code: p.product_code,
+      }).session(session);
+      if (!store) {
+        // If stock is not found, we can't revert the changes. Abort.
+        await session.abortTransaction();
+        session.endSession();
+        throw new Error(
+          `Stock not found for product ${p.product_code}. Cannot revert stock.`
+        );
+      }
+
+      // Add the sold feet back to the store's feet count
+      const updatedFeet = store.feet + p.sell_feet;
+
+      // Update the store with the new stock count
+      await Store.updateOne(
+        { product_code: p.product_code },
+        { $set: { feet: updatedFeet } },
+        { session }
+      );
+    }
+
+    // After successfully updating all stocks, delete the sale
+    await Sale.deleteOne({ _id: id }).session(session);
+
+    // Commit the transaction to save all changes
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.json({
+      success: true,
+      message: "Sale deleted and stock reverted successfully.",
+    });
+  } catch (err: any) {
+    // If any error occurs, abort the transaction to revert all changes
+    await session.abortTransaction();
+    session.endSession();
+
+    if (err instanceof Error && err.message.includes("Stock not found")) {
+      return res.status(500).json({
+        success: false,
+        message: err.message,
+        errorType: "StockRevertError",
       });
     }
 

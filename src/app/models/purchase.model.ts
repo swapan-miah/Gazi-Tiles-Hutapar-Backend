@@ -16,7 +16,12 @@ const PurchaseSchema = new Schema<IPurchase>(
     caton: {
       type: Number,
       required: [true, "Caton quantity is required."],
-      min: [1, "Caton cannot be negative."], // Example of a number validator
+      min: [0, "Caton cannot be negative."], // Example of a number validator
+    },
+    pcs: {
+      type: Number,
+      required: [true, "Pcs quantity is required."],
+      min: [0, "Pcs cannot be negative."], // Example of a number validator
     },
     height: {
       type: Number,

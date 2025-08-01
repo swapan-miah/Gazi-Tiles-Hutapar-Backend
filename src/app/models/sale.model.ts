@@ -26,6 +26,7 @@ const SaleSchema = new Schema<ISale>({
   },
   invoice_number: {
     type: Number,
+    unique: true,
     required: true,
   },
 });

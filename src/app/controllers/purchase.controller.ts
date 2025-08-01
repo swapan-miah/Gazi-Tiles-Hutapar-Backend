@@ -6,25 +6,33 @@ import mongoose from "mongoose";
 
 export const purchaseRoutes = express.Router();
 
-const purchaseSchema = z.object({
-  product_code: z.string().min(1, "Product code is required"),
-  company: z.string().min(1, "Company is required"),
-  caton: z.number().min(1, "Caton must be at least 1"),
-  height: z.number().min(1, "Height must be at least 1"),
-  width: z.number().min(1, "Width must be at least 1"),
-  per_caton_to_pcs: z.number().min(1, "Per caton to pcs must be at least 1"),
-  date: z.string().min(1, "Date is required"),
-});
+const purchaseSchema = z
+  .object({
+    product_code: z.string().min(1, "Product code is required"),
+    company: z.string().min(1, "Company is required"),
+    caton: z.number().min(0, "Caton must be at least 0"),
+    pcs: z.number().min(0, "Pcs must be at least 0"),
+    height: z.number().min(1, "Height must be at least 1"),
+    width: z.number().min(1, "Width must be at least 1"),
+    per_caton_to_pcs: z.number().min(1, "Per caton to pcs must be at least 1"),
+    date: z.string().min(1, "Date is required"),
+  })
+  .refine((data) => data.caton > 0 || data.pcs > 0, {
+    message: "Either Caton or Pcs must be greater than 0",
+    // path: ["caton"], // অথবা চাইলে "pcs" বা [] দিতে পারো
+  });
 
 // Helper function to calculate feet from purchase details
 const calculateFeet = (
   height: number,
   width: number,
   per_caton_to_pcs: number,
-  caton: number
+  caton: number,
+  pcs: number
 ): number => {
+  const perPcsToFeet = (height * width) / 144;
   const perCatonToFeet = ((height * width) / 144) * per_caton_to_pcs;
-  return perCatonToFeet * caton;
+  return perCatonToFeet * caton + perPcsToFeet * pcs;
 };
 
 // --- PATCH /api/purchase/update/:id ---
@@ -62,7 +70,8 @@ purchaseRoutes.patch(
         oldPurchase.height,
         oldPurchase.width,
         oldPurchase.per_caton_to_pcs,
-        oldPurchase.caton
+        oldPurchase.caton,
+        oldPurchase.pcs
       );
 
       // ==== Case 1: product_code changed ====
@@ -87,7 +96,8 @@ purchaseRoutes.patch(
           updateData.height,
           updateData.width,
           updateData.per_caton_to_pcs,
-          updateData.caton
+          updateData.caton,
+          updateData.pcs
         );
 
         if (!newStore) {
@@ -136,7 +146,8 @@ purchaseRoutes.patch(
           oldPurchase.height,
           oldPurchase.width,
           oldPurchase.per_caton_to_pcs,
-          oldPurchase.caton
+          oldPurchase.caton,
+          oldPurchase.pcs
         );
 
         store.feet += newFeet;
@@ -179,13 +190,14 @@ purchaseRoutes.post(
         product_code,
         company,
         caton,
+        pcs,
         height,
         width,
         per_caton_to_pcs,
         date,
       } = parsed.data;
 
-      const feet = calculateFeet(height, width, per_caton_to_pcs, caton);
+      const feet = calculateFeet(height, width, per_caton_to_pcs, caton, pcs);
 
       // Save Purchase
       const newPurchase = await Purchase.create(
@@ -194,6 +206,7 @@ purchaseRoutes.post(
             product_code,
             company,
             caton,
+            pcs,
             height,
             width,
             per_caton_to_pcs,
@@ -315,6 +328,70 @@ purchaseRoutes.get(
       });
     } catch (err) {
       next(err); // Central error handler
+    }
+  }
+);
+
+// --- DELETE /api/purchase/:id ---
+purchaseRoutes.delete(
+  "/:id",
+  async (req: Request, res: Response, next: NextFunction) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      const { id } = req.params;
+
+      const purchase = await Purchase.findById(id).session(session);
+      if (!purchase) {
+        await session.abortTransaction();
+        session.endSession();
+        return res
+          .status(404)
+          .json({ success: false, message: "❌ Purchase not found." });
+      }
+
+      // 1. Calculate how much feet to reduce from store
+      const feetToReduce = calculateFeet(
+        purchase.height,
+        purchase.width,
+        purchase.per_caton_to_pcs,
+        purchase.caton,
+        purchase.pcs
+      );
+
+      // 2. Update store
+      const store = await Store.findOne({
+        product_code: purchase.product_code,
+      }).session(session);
+
+      if (!store) {
+        await session.abortTransaction();
+        session.endSession();
+        return res
+          .status(404)
+          .json({ success: false, message: "❌ Store not found." });
+      }
+
+      store.feet -= feetToReduce;
+      if (store.feet < 0) store.feet = 0;
+
+      await store.save({ session });
+
+      // 3. Delete purchase
+      await Purchase.findByIdAndDelete(id).session(session);
+
+      await session.commitTransaction();
+      session.endSession();
+
+      return res.status(200).json({
+        success: true,
+        message: "🗑️ Purchase deleted successfully!",
+      });
+    } catch (err) {
+      await session.abortTransaction();
+      session.endSession();
+      next(err);
     }
   }
 );

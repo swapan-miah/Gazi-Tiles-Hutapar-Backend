@@ -6,7 +6,6 @@ import { productRoutes } from "./app/controllers/product.controller";
 import { purchaseRoutes } from "./app/controllers/purchase.controller";
 import { storeRoutes } from "./app/controllers/store.controller";
 import { saleRoutes } from "./app/controllers/sales.controller";
-import { invoiceRoutes } from "./app/controllers/invoice.controller";
 import { globalErrorHandler } from "./app/middleware/globalErrorHandler";
 import { guideRoutes } from "./app/controllers/guide.controller";
 
@@ -22,7 +21,6 @@ app.use("/api/product", productRoutes);
 app.use("/api/purchase", purchaseRoutes);
 app.use("/api/store", storeRoutes);
 app.use("/api/sale", saleRoutes);
-app.use("/api/invoice", invoiceRoutes);
 app.use("/api/guide", guideRoutes);
 
 app.use(globalErrorHandler);
