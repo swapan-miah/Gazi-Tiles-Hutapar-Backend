@@ -4,6 +4,7 @@ import { z } from "zod";
 import { Sale } from "../models/sale.model";
 import { Store } from "../models/store.model";
 import mongoose from "mongoose";
+import { Invoice } from "../models/invoice.model";
 
 export const saleRoutes = express.Router();
 
@@ -32,6 +33,87 @@ const saleSchema = z.object({
     .min(1),
 });
 
+// saleRoutes.post("/create", async (req, res) => {
+//   const session = await mongoose.startSession();
+//   session.startTransaction();
+
+//   try {
+//     const parsed = saleSchema.parse(req.body);
+//     const invoiceNum = parsed.invoice_number;
+
+//     // স্টক যাচাই
+//     for (const p of parsed.products) {
+//       const store = await Store.findOne({
+//         product_code: p.product_code,
+//       }).session(session);
+//       if (!store)
+//         throw new Error(`Stock not found for product ${p.product_code}`);
+
+//       if (store.feet + 0.3 < p.sell_feet) {
+//         throw new Error(`Insufficient feet for ${p.product_code}`);
+//       }
+//     }
+
+//     // স্টক আপডেট করা
+//     for (const p of parsed.products) {
+//       const store = await Store.findOne({
+//         product_code: p.product_code,
+//       }).session(session);
+//       if (!store)
+//         throw new Error(`Stock not found for product ${p.product_code}`);
+
+//       const updatedFeet = store.feet - p.sell_feet;
+//       const newFeet = updatedFeet < 0 ? 0 : updatedFeet;
+
+//       await Store.updateOne(
+//         { product_code: p.product_code },
+//         { $set: { feet: newFeet } },
+//         { session }
+//       );
+//     }
+
+//     // সেল সেভ করা
+//     const sale = new Sale(parsed);
+//     await sale.save({ session });
+
+//     await session.commitTransaction();
+//     session.endSession();
+
+//     return res.json({ success: true, invoice_number: invoiceNum });
+//   } catch (err: any) {
+//     await session.abortTransaction();
+//     session.endSession();
+
+//     if (err?.name === "ZodError") {
+//       return res.status(400).json({
+//         success: false,
+//         message: err.errors[0]?.message,
+//         errorType: "ValidationError",
+//       });
+//     }
+//     if (err instanceof Error && err.message.includes("Insufficient")) {
+//       return res.status(400).json({
+//         success: false,
+//         message: err.message,
+//         errorType: "StockError",
+//       });
+//     }
+//     if (err instanceof Error && err.message.includes("Stock not found")) {
+//       return res.status(404).json({
+//         success: false,
+//         message: err.message,
+//         errorType: "NotFoundError",
+//       });
+//     }
+
+//     return res.status(500).json({
+//       success: false,
+//       message: "Internal server error",
+//       error: err.message ?? err,
+//     });
+//   }
+// });
+
 saleRoutes.post("/create", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -40,7 +122,17 @@ saleRoutes.post("/create", async (req, res) => {
     const parsed = saleSchema.parse(req.body);
     const invoiceNum = parsed.invoice_number;
 
-    // স্টক যাচাই
+    // ✅ Step 1: Check if an invoice with this number already exists
+    const existingSale = await Sale.findOne({
+      invoice_number: invoiceNum,
+    }).session(session);
+    if (existingSale) {
+      throw new Error(
+        "Invoice number already exists. Please use the next available number."
+      );
+    }
+
+    // ✅ Step 2: Validate stock
     for (const p of parsed.products) {
       const store = await Store.findOne({
         product_code: p.product_code,
@@ -53,7 +145,7 @@ saleRoutes.post("/create", async (req, res) => {
       }
     }
 
-    // স্টক আপডেট করা
+    // ✅ Step 3: Update stock
     for (const p of parsed.products) {
       const store = await Store.findOne({
         product_code: p.product_code,
@@ -71,9 +163,16 @@ saleRoutes.post("/create", async (req, res) => {
       );
     }
 
-    // সেল সেভ করা
+    // ✅ Step 4: Save the new sale
     const sale = new Sale(parsed);
     await sale.save({ session });
+
+    // ✅ Step 5: Atomically increment the invoice number in the Invoice collection
+    await Invoice.findByIdAndUpdate(
+      "68830830b0857da6bf29f920",
+      { $inc: { invoice_number: 1 } },
+      { new: true, session }
+    );
 
     await session.commitTransaction();
     session.endSession();
@@ -102,6 +201,16 @@ saleRoutes.post("/create", async (req, res) => {
         success: false,
         message: err.message,
         errorType: "NotFoundError",
+      });
+    }
+    if (
+      err instanceof Error &&
+      err.message.includes("Invoice number already exists")
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: err.message,
+        errorType: "DuplicateInvoiceError",
       });
     }
 
